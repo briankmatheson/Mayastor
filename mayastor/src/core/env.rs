@@ -52,6 +52,7 @@ use crate::{
     subsys::Config,
     target::{iscsi, nvmf},
 };
+use futures::channel::oneshot;
 
 fn parse_mb(src: &str) -> Result<i32, String> {
     // For compatibility, we check to see if there are no alphabetic characters
@@ -301,7 +302,7 @@ pub fn mayastor_env_stop(rc: i32) {
 
     match r.get_sate() {
         reactor::INIT => {
-            Reactor::block_on(async move {
+            r.send_future(async move {
                 do_shutdown(rc as *const i32 as *mut c_void).await;
             });
         }
@@ -322,6 +323,12 @@ extern "C" fn mayastor_signal_handler(signo: i32) {
     // we don't differentiate between signal numbers for now, all signals will
     // cause a shutdown
     mayastor_env_stop(signo);
+}
+
+#[derive(Debug)]
+struct SubsystemCtx {
+    rpc: CString,
+    sender: futures::channel::oneshot::Sender<bool>,
 }
 
 impl MayastorEnvironment {
@@ -370,7 +377,6 @@ impl MayastorEnvironment {
     /// read the config file we use this mostly for testing
     fn read_config_file(&self) -> Result<()> {
         if self.config.is_none() {
-            trace!("no configuration file specified");
             return Ok(());
         }
 
@@ -600,19 +606,22 @@ impl MayastorEnvironment {
     }
 
     extern "C" fn start_rpc(rc: i32, arg: *mut c_void) {
-        if arg.is_null() || rc != 0 {
-            panic!("Failed to initialize subsystems: {}", rc);
+        let ctx = unsafe { Box::from_raw(arg as *mut SubsystemCtx) };
+
+        if rc != 0 {
+            ctx.sender.send(false).unwrap();
+        } else {
+            info!("RPC server listening at: {}", ctx.rpc.to_str().unwrap());
+            unsafe {
+                dbg!(&Reactors::current());
+                spdk_rpc_initialize(ctx.rpc.as_ptr() as *mut i8);
+                spdk_rpc_set_state(SPDK_RPC_RUNTIME);
+            };
+
+            Self::target_init().unwrap();
+
+            ctx.sender.send(true).unwrap();
         }
-
-        let rpc = unsafe { CString::from_raw(arg as _) };
-
-        info!("RPC server listening at: {}", rpc.to_str().unwrap());
-        unsafe {
-            spdk_rpc_initialize(arg as *mut i8);
-            spdk_rpc_set_state(SPDK_RPC_RUNTIME);
-        };
-
-        Self::target_init().unwrap();
     }
 
     fn load_yaml_config(&self) {
@@ -635,6 +644,9 @@ impl MayastorEnvironment {
     }
     /// initialize the core, call this before all else
     pub fn init(mut self) -> Self {
+        // setup the logger as soon as possible
+        self.init_logger().unwrap();
+
         self.load_yaml_config();
         // load the .ini format file, still here to allow CI passing. There is
         // no real harm of loading this ini file as long as there are no
@@ -644,8 +656,6 @@ impl MayastorEnvironment {
         // bootstrap DPDK and its magic
         self.initialize_eal();
 
-        // setup the logger as soon as possible
-        self.init_logger().unwrap();
         if self.enable_coredump {
             //TODO
             warn!("rlimit configuration not implemented");
@@ -669,17 +679,27 @@ impl MayastorEnvironment {
             .into_iter()
             .for_each(|c| Reactors::launch_remote(c).unwrap());
 
-        let rpc = CString::new(self.rpc_addr.as_str()).unwrap();
-
         // register our RPC methods
         crate::pool::register_pool_methods();
         crate::replica::register_replica_methods();
+        Reactors::master().poll_times(5);
 
-        // init the subsystems
+        let rpc = CString::new(self.rpc_addr.as_str()).unwrap();
+
         Reactor::block_on(async {
+            let (sender, receiver) = oneshot::channel::<bool>();
+
             unsafe {
-                spdk_subsystem_init(Some(Self::start_rpc), rpc.into_raw() as _);
+                spdk_subsystem_init(
+                    Some(Self::start_rpc),
+                    Box::into_raw(Box::new(SubsystemCtx {
+                        rpc,
+                        sender,
+                    })) as *mut _,
+                );
             }
+
+            assert_eq!(receiver.await.unwrap(), true);
         });
 
         // load any bdevs that need to be created
@@ -722,7 +742,7 @@ impl MayastorEnvironment {
                     let master = Reactors::current();
                     master.send_future(async { f() });
                     if grpc {
-                        let _out = tokio::try_join!(
+                        let _ = tokio::try_join!(
                             grpc_server_init(
                                 &grpc_addr.as_ref().unwrap(),
                                 &grpc_port.as_ref().unwrap()
@@ -730,7 +750,7 @@ impl MayastorEnvironment {
                             master
                         );
                     } else {
-                        let _out = master.await;
+                        let _ = master.await;
                     };
                     info!("reactors stopped....");
                     Self::fini();

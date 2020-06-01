@@ -9,6 +9,7 @@ use mayastor::{
     core::{mayastor_env_stop, MayastorCliArgs, MayastorEnvironment, Reactor},
 };
 
+use mayastor::core::Reactors;
 use rpc::mayastor::ShareProtocolNexus;
 
 static DISKNAME1: &str = "/tmp/disk1.img";
@@ -74,15 +75,27 @@ async fn rebuild_test_start() {
 
     // kick's off the rebuild (NOWAIT) so we have to wait on a channel
     let rebuild_complete = nexus.start_rebuild(BDEVNAME2).await.unwrap();
-    let (s, r) = unbounded::<()>();
+    let (s, r) = unbounded::<bool>();
     std::thread::spawn(move || {
         select! {
             recv(rebuild_complete) -> state => info!("rebuild of child {} finished with state {:?}", BDEVNAME2, state),
-            recv(after(Duration::from_secs(10))) -> _ => panic!("timed out waiting for the rebuild to complete"),
+            recv(after(Duration::from_secs(15))) -> _ => {
+                s.send(false).unwrap();
+            }
         }
-        s.send(())
+        s.send(true).unwrap();
     });
-    reactor_poll!(r);
+
+    loop {
+        if let Ok(result) = r.try_recv() {
+            if !result {
+                mayastor_env_stop(0);
+                panic!("rebuild failed!");
+            }
+            break;
+        }
+        Reactors::master().poll_once();
+    }
 
     let (s, r) = unbounded::<String>();
     std::thread::spawn(move || {

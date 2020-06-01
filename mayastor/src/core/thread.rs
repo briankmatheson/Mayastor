@@ -2,12 +2,15 @@ use std::ffi::CString;
 
 use snafu::Snafu;
 
+use crate::core::cpu_cores::CpuMask;
+use once_cell::sync::OnceCell;
 use spdk_sys::{
     spdk_set_thread,
     spdk_thread,
     spdk_thread_create,
     spdk_thread_destroy,
     spdk_thread_exit,
+    spdk_thread_is_exited,
     spdk_thread_poll,
 };
 
@@ -17,6 +20,7 @@ pub enum Error {
     InvalidThread {},
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 /// struct that wraps an SPDK thread. The name thread is chosen poorly and
 /// should not be confused with an actual thread. Consider it more to be
@@ -27,6 +31,8 @@ pub struct Mthread(pub(crate) *mut spdk_thread);
 unsafe impl Send for Mthread {}
 unsafe impl Sync for Mthread {}
 
+pub static INIT_THREAD: OnceCell<Mthread> = OnceCell::new();
+
 impl Mthread {
     ///
     /// With the given thread as context, execute the closure on that thread.
@@ -34,11 +40,14 @@ impl Mthread {
     /// Any function can be executed here however, this should typically be used
     /// to execute functions that reference any FFI to SPDK.
 
-    pub fn new(name: String) -> Self {
+    pub fn new(name: String, core: u32) -> Option<Self> {
         let name = CString::new(name).unwrap();
-        let t =
-            unsafe { spdk_thread_create(name.as_ptr(), std::ptr::null_mut()) };
-        Self::from_null_checked(t).unwrap()
+        let t = unsafe {
+            let mut mask = CpuMask::new();
+            mask.set_cpu(core, true);
+            spdk_thread_create(name.as_ptr(), mask.as_ptr())
+        };
+        Self::from_null_checked(t)
     }
     ///
     /// # Note
@@ -47,13 +56,13 @@ impl Mthread {
     /// long-running functions in general follow the nodejs event loop
     /// model, and you should be good.
     pub fn with<F: FnOnce()>(self, f: F) -> Self {
-        //assert_eq!(unsafe {spdk_sys::spdk_get_thread()},
-        // std::ptr::null_mut());
+        self.enter();
         f();
-        self.poll();
+        self.poll().exit();
         self
     }
 
+    //TODO: we should pull out the management thread to avoid starvation
     pub fn poll(self) -> Self {
         let mut done = false;
         while !done {
@@ -76,11 +85,23 @@ impl Mthread {
         unsafe { spdk_set_thread(std::ptr::null_mut()) };
     }
 
+    /// destroy the given thread waiting for it to become ready to destroy
     pub fn destroy(self) {
-        debug!("destroying thread...");
-        unsafe { spdk_set_thread(self.0) };
-        unsafe { spdk_thread_exit(self.0) };
-        unsafe { spdk_thread_destroy(self.0) };
+        debug!("destroying thread...{:p}", self.0);
+        unsafe {
+            spdk_set_thread(self.0);
+            // set that we *want* to exit, but we have not exited yet
+            spdk_thread_exit(self.0);
+
+            // now wait until the thread is actually excited the internal
+            // state is updated by spdk_thread_poll()
+            while !spdk_thread_is_exited(self.0) {
+                spdk_thread_poll(self.0, 0, 0);
+            }
+            spdk_thread_destroy(self.0);
+        }
+
+        debug!("thread {:p} destroyed", self.0);
     }
 
     pub fn inner(self) -> *const spdk_thread {

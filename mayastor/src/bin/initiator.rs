@@ -26,6 +26,7 @@ use mayastor::{
     jsonrpc::print_error_chain,
     logger,
     nexus_uri::{bdev_create, BdevCreateDestroy},
+    subsys,
     subsys::Config,
 };
 
@@ -158,8 +159,15 @@ fn main() {
     let mut ms = MayastorEnvironment::default();
 
     ms.name = "initiator".into();
-    ms.mem_size = 256;
     ms.rpc_addr = "/tmp/initiator.sock".into();
+    let _cfg = Config::get_or_init(|| Config {
+        nexus_opts: subsys::NexusOpts {
+            nvmf_enable: false,
+            iscsi_enable: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
 
     // This tool is just a client, so don't start iSCSI or NVMEoF services.
     Config::get_or_init(|| {

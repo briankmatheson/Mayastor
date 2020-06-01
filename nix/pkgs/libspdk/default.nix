@@ -10,9 +10,10 @@
 , liburing
 , libuuid
 , nasm
+, ncurses
 , numactl
 , openssl
-, python
+, python3
 , rdma-core
 , stdenv
 }:
@@ -21,8 +22,8 @@ stdenv.mkDerivation rec {
   src = fetchFromGitHub {
     owner = "openebs";
     repo = "spdk";
-    rev = "bef8258c3116d8d427d46fab5985bb080ffb7666";
-    sha256 = "00xsfhlqiwnq3777xg8x6chcqr4nxhhqqmbsq1a2gng2iyhlpxzd";
+    rev = "0dd3398ace940bb291e18138a2535cf6b1e161b5";
+    sha256 = "06pch25iq5xdr934njc6f972b4xzdrdm7d1ss15qlj60g0cnzjrg";
     fetchSubmodules = true;
   };
 
@@ -35,25 +36,25 @@ stdenv.mkDerivation rec {
     libuuid
     liburing
     nasm
+    ncurses
     numactl
     openssl
-    python
+    python3
   ] ++ stdenv.lib.optionals enableDebug [ cunit lcov ];
 
   # add this once we merged this new option from upstream. The tests are going
   # to be split up in unit-test and test configure options. test will contain
   # utilities like bdevperf that is getting more features into it.
 
-  #${enableFeature enableDebug "unit-tests"}
-
   configureFlags = [
     "${enableFeature enableDebug "debug"}"
+    "${enableFeature enableDebug "unit-tests"}"
     "${enableFeature enableDebug "tests"}"
     "--without-isal"
     "--with-iscsi-initiator"
-    "--with-internal-vhost-lib"
     "--with-crypto"
     "--with-uring"
+    "--with-internal-vhost-lib"
   ];
 
   enableParallelBuilding = true;

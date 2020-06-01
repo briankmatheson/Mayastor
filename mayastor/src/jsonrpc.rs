@@ -211,7 +211,7 @@ unsafe extern "C" fn jsonrpc_handler<H, P, R, E>(
                         spdk_json_write_val_raw(
                             w_ctx,
                             data.as_ptr() as *const c_void,
-                            data.as_bytes().len(),
+                            data.as_bytes().len() as u64,
                         );
                         spdk_jsonrpc_end_result(request, w_ctx);
                     }
@@ -231,7 +231,7 @@ unsafe extern "C" fn jsonrpc_handler<H, P, R, E>(
 
             // it is expected rpc runs on the first core
             let reactor = Reactors::current();
-            assert_eq!(reactor.core(), Cores::first());
+            dbg!(&reactor);
             reactor.send_future(fut);
         }
         Err(err) => {

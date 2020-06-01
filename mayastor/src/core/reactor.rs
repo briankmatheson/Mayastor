@@ -1,6 +1,6 @@
 //! The first thing that needs to happen is to initialize DPDK, this among
 //! others provides us with lockless queues which we use to send messages
-//! between the cores.  Typically these messages contain simple function
+//! between the cores.  Typically, these messages contain simple function
 //! pointers and argument pointers.
 //!
 //! Per core data structure, there are so-called threads. These threads
@@ -29,10 +29,19 @@
 //! is used for holding on to the messages while it is being processed. Once
 //! processed (or completed) it is dropped from the queue. Unlike the native
 //! SPDK messages, these futures -- are allocated before they execute.
-use spdk_sys::spdk_get_thread;
-use std::{cell::Cell, os::raw::c_void, pin::Pin, slice::Iter, time::Duration};
+use std::{
+    cell::Cell,
+    os::raw::c_void,
+    pin::Pin,
+    slice::Iter,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use crossbeam::{
+    channel::{unbounded, Receiver, Sender},
+    queue::ArrayQueue,
+};
 use futures::{
     task::{Context, Poll},
     Future,
@@ -41,12 +50,16 @@ use log::info;
 use once_cell::sync::OnceCell;
 
 use spdk_sys::{
+    spdk_cpuset_get_cpu,
     spdk_env_thread_launch_pinned,
     spdk_env_thread_wait_all,
-    spdk_thread_lib_init,
+    spdk_thread,
+    spdk_thread_create,
+    spdk_thread_get_cpumask,
+    spdk_thread_lib_init_ext,
 };
 
-use crate::core::{Cores, Mthread};
+use crate::core::{thread::INIT_THREAD, Cores, Mthread};
 
 pub(crate) const INIT: usize = 1;
 pub(crate) const RUNNING: usize = 1 << 1;
@@ -63,11 +76,15 @@ unsafe impl Send for Reactors {}
 unsafe impl Sync for Reactor {}
 unsafe impl Send for Reactor {}
 pub static REACTOR_LIST: OnceCell<Reactors> = OnceCell::new();
+pub static REACTOR_LOCK: OnceCell<Mutex<bool>> = OnceCell::new();
+pub static MASTER_REACTOR: OnceCell<Reactor> = OnceCell::new();
+
 #[repr(C, align(64))]
 #[derive(Debug)]
 pub struct Reactor {
     /// vector of threads allocated by the various subsystems
-    threads: Vec<Mthread>,
+    /// TODO: should not ref count here
+    threads: ArrayQueue<Mthread>,
     /// the logical core this reactor is created on
     lcore: u32,
     /// represents the state of the reactor
@@ -87,9 +104,18 @@ impl Reactors {
     /// initialize the reactor subsystem for each core assigned to us
     pub fn init() {
         REACTOR_LIST.get_or_init(|| {
-            let rc = unsafe { spdk_thread_lib_init(None, 0) };
+            let rc = unsafe {
+                spdk_thread_lib_init_ext(
+                    Some(Self::do_op),
+                    Some(Self::can_op),
+                    0,
+                )
+            };
             assert_eq!(rc, 0);
 
+            REACTOR_LOCK.get_or_init(|| Mutex::new(true));
+
+            REACTOR_LOCK.get().unwrap().lock().unwrap();
             Reactors(
                 Cores::count()
                     .into_iter()
@@ -100,8 +126,58 @@ impl Reactors {
                     .collect::<Vec<_>>(),
             )
         });
+
+        INIT_THREAD.get_or_init(|| {
+            Mthread::new("INIT_THREAD".into(), Cores::first()).unwrap()
+        });
     }
 
+    /// advertise what scheduling options we support
+    extern "C" fn can_op(op: spdk_sys::spdk_thread_op) -> bool {
+        match op {
+            spdk_sys::SPDK_THREAD_OP_NEW => true,
+            _ => false,
+        }
+    }
+
+    /// do the advertised scheduling option
+    extern "C" fn do_op(
+        thread: *mut spdk_thread,
+        op: spdk_sys::spdk_thread_op,
+    ) -> i32 {
+        match op {
+            spdk_sys::SPDK_THREAD_OP_NEW => Self::schedule(thread),
+            _ => -1,
+        }
+    }
+
+    fn with_reactor_locked<F>(f: F)
+    where
+        F: FnOnce(),
+    {
+        REACTOR_LOCK.get().unwrap().lock().unwrap();
+        f()
+    }
+
+    /// schedule a thread in here, we should make smart choices based
+    /// on load etc, right now we schedule to the current core.
+    fn schedule(thread: *mut spdk_sys::spdk_thread) -> i32 {
+        let mask = unsafe { spdk_thread_get_cpumask(thread) };
+        Self::with_reactor_locked(|| {
+            if !Reactors::iter().any(|r| {
+                if unsafe { spdk_cpuset_get_cpu(mask, r.lcore) } {
+                    r.threads.push(Mthread(thread)).unwrap();
+                    info!("scheduled {:p} on {}", thread, r.lcore);
+                    return true;
+                }
+                false
+            }) {
+                error!("failed to find core for thread {:p}!", thread);
+            }
+        });
+
+        0
+    }
     /// launch the poll loop on the master core, this is implemented somewhat
     /// different from the remote cores.
     pub fn launch_master() {
@@ -171,26 +247,41 @@ impl<'a> IntoIterator for &'a Reactors {
 impl Reactor {
     /// create a new ['Reactor'] instance
     fn new(core: u32) -> Self {
-        // allocate a new thread which provides the SPDK context
-        let t = Mthread::new(format!("core_{}", core));
         // create a channel to receive futures on
         let (sx, rx) =
             unbounded::<Pin<Box<dyn Future<Output = ()> + 'static>>>();
 
-        Self {
-            threads: vec![t],
+        let reactor = Self {
+            threads: ArrayQueue::<Mthread>::new(512),
             lcore: core,
             flags: Cell::new(INIT),
             sx,
             rx,
-        }
+        };
+
+        // create a new main thread on which we run management tasks. As we are
+        // in the process of boot strapping the reactor is not active
+        // and thus we are not executing yet within a context of a valid
+        // thread. Therefore we dispatch a future which will get executed
+        // once we start polling.
+        reactor.send_future(async {
+            let core = Reactors::current().lcore;
+            // allocate the main thread
+            if Mthread::new(format!("core_{}_management", core), core).is_none()
+            {
+                panic!("failed to allocate thread during init");
+            }
+
+            trace!("dispatched future");
+        });
+
+        reactor
     }
 
     /// this function gets called by DPDK
     extern "C" fn poll(core: *mut c_void) -> i32 {
         debug!("Start polling of reactor {}", core as u32);
         let reactor = Reactors::get_by_core(core as u32).unwrap();
-        reactor.thread_enter();
         if reactor.flags.get() != INIT {
             warn!("calling poll on a reactor who is not in the INIT state");
         }
@@ -251,9 +342,7 @@ impl Reactor {
         F: Future<Output = R> + 'static,
         R: 'static,
     {
-        // get the current reactor and ensure that we are running within the
-        // context of the first thread.
-        let reactor = Reactors::current();
+        let reactor = Reactors::master();
         reactor.thread_enter();
         let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
         let (task, handle) = async_task::spawn_local(future, schedule, ());
@@ -273,11 +362,8 @@ impl Reactor {
                     return output;
                 }
                 Poll::Pending => {
-                    assert_eq!(reactor.threads[0].0, unsafe {
-                        spdk_get_thread()
-                    });
                     reactor.run_futures();
-                    reactor.threads[0].poll();
+                    Reactors::master().poll_once();
                 }
             }
         }
@@ -336,8 +422,7 @@ impl Reactor {
                     std::thread::sleep(Duration::from_millis(100));
                 }
                 // running is the default mode for all cores. All cores, except
-                // the master core spin within this specific
-                // loop
+                // the master core spin within this specific loop
                 RUNNING => {
                     self.poll_once();
                 }
@@ -356,7 +441,8 @@ impl Reactor {
         debug!("initiating shutdown for core {}", Cores::current());
         // clean up the threads, threads can only be destroyed during shutdown
         // in the rest of SPDK
-        self.threads.iter().for_each(|t| t.destroy());
+        // self.threads.borrow().iter().for_each(|t| t.destroy());
+        // self.main.borrow_mut().take().unwrap().destroy();
 
         if self.lcore == Cores::first() {
             debug!("master core stopped polling");
@@ -368,7 +454,10 @@ impl Reactor {
     /// can process, or submit any messages.
     #[inline]
     pub fn thread_enter(&self) {
-        self.threads[0].enter();
+        if let Ok(thread) = self.threads.pop() {
+            thread.enter().enter();
+            self.threads.push(thread).unwrap();
+        }
     }
 
     /// polls the reactor only once for any work regardless of its state. For
@@ -378,14 +467,22 @@ impl Reactor {
         self.receive_futures();
         self.run_futures();
 
-        // poll any thread for events
-        self.threads.iter().for_each(|t| {
-            t.poll();
-        });
+        for _ in 0 .. self.threads.len() {
+            if let Ok(thread) = self.threads.pop() {
+                thread.enter().poll().exit();
+                self.threads.push(thread).unwrap();
+            }
+        }
 
-        // during polling, we switch context ensure we leave the poll routine
-        // with setting a context again.
         self.thread_enter();
+    }
+
+    pub fn poll_times(&self, times: u32) {
+        for _ in 0 .. times {
+            self.receive_futures();
+            self.run_futures();
+            self.poll_once();
+        }
     }
 }
 
@@ -407,8 +504,8 @@ impl Future for &'static Reactor {
             }
             SHUTDOWN => {
                 info!("future reactor {} shutdown requested", self.lcore);
-
-                self.threads.iter().for_each(|t| t.destroy());
+                //self.main.borrow().unwrap().destroy();
+                //self.threads.borrow().iter().for_each(|t| t.destroy());
                 unsafe { spdk_env_thread_wait_all() };
                 Poll::Ready(Err(()))
             }

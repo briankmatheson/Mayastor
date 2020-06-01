@@ -22,6 +22,7 @@ mod dma;
 mod env;
 mod handle;
 mod reactor;
+mod ring;
 mod thread;
 mod uuid;
 

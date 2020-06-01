@@ -14,6 +14,7 @@ use spdk_sys::{
 use crate::jsonrpc::jsonrpc_register;
 pub use config::{BaseBdev, Config, NexusBdev, Pool};
 use futures::FutureExt;
+pub use opts::NexusOpts;
 
 use crate::bdev::nexus::nexus_bdev::Error;
 
@@ -70,7 +71,7 @@ impl MayastorSubsystem {
             spdk_json_write_val_raw(
                 w,
                 data.as_ptr() as *const _,
-                data.as_bytes().len(),
+                data.as_bytes().len() as u64,
             );
         }
     }
