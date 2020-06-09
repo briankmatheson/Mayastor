@@ -661,6 +661,18 @@ describe('nexus', function () {
       );
     });
 
+    it('should discover the nvmf nexus device', (done) => {
+      exec('sudo nvme discover -a ' + externIp + ' -s 8420 -t tcp -q nqn.2014-08.org.nvmexpress.discovery', (err, stdout, stderr) => {
+        if (err) {
+          done(stderr);
+        } else {
+          // The discovery reply text should contain our nexus
+          assert.include(stdout.toString(), 'nqn.2019-05.io.openebs:nexus-' + UUID);
+          done();
+        }
+      });
+    });
+
     it('should write to nvmf replica', (done) => {
       common.execAsRoot(
         common.getCmdPath('initiator'),
