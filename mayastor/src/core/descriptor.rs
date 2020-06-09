@@ -13,7 +13,7 @@ use spdk_sys::{
 
 use crate::{
     bdev::nexus::nexus_module::NEXUS_MODULE,
-    core::{channel::IoChannel, Bdev, BdevHandle, CoreError},
+    core::{channel::IoChannel, Bdev, BdevHandle, CoreError, Mthread},
 };
 
 /// NewType around a descriptor, multiple descriptor to the same bdev is

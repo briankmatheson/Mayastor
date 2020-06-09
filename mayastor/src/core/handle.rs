@@ -21,7 +21,7 @@ use spdk_sys::{
 };
 
 use crate::{
-    core::{Bdev, CoreError, Descriptor, DmaBuf, DmaError, IoChannel},
+    core::{Bdev, CoreError, Descriptor, DmaBuf, DmaError, IoChannel, Mthread},
     ffihelper::cb_arg,
 };
 

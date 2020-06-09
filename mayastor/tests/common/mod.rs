@@ -89,8 +89,8 @@ pub fn mayastor_test_init() {
             }
         });
 
-    logger::init("DEBUG");
-    env::set_var("MAYASTOR_LOGLEVEL", "4");
+    logger::init("TRACE");
+    env::set_var("MAYASTOR_LOGLEVEL", "9");
     mayastor::CPS_INIT!();
 }
 

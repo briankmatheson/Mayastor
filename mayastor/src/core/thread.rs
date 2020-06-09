@@ -5,6 +5,7 @@ use snafu::Snafu;
 use crate::core::cpu_cores::CpuMask;
 use once_cell::sync::OnceCell;
 use spdk_sys::{
+    spdk_get_thread,
     spdk_set_thread,
     spdk_thread,
     spdk_thread_create,
@@ -83,6 +84,10 @@ impl Mthread {
     #[inline]
     pub fn exit(self) {
         unsafe { spdk_set_thread(std::ptr::null_mut()) };
+    }
+
+    pub fn current() -> Option<Mthread> {
+        Mthread::from_null_checked(unsafe { spdk_get_thread() })
     }
 
     /// destroy the given thread waiting for it to become ready to destroy

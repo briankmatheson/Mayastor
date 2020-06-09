@@ -338,7 +338,7 @@ impl MayastorEnvironment {
             grpc_port: Some(args.port),
             config: args.config,
             mayastor_config: args.mayastor_config,
-            log_component: args.log_components,
+            log_component: vec!["-L".to_string(), "thread".into()],
             mem_size: args.mem_size,
             no_pci: args.no_pci,
             reactor_mask: args.reactor_mask,
@@ -531,19 +531,19 @@ impl MayastorEnvironment {
     /// initialize the logging subsystem
     fn init_logger(&mut self) -> Result<()> {
         // if log flags are specified increase the loglevel and print level.
-        if !self.log_component.is_empty() {
-            warn!("Increasing debug and print level ...");
-            self.debug_level = SPDK_LOG_DEBUG;
-            self.print_level = SPDK_LOG_DEBUG;
-        }
+        //if !self.log_component.is_empty() {
+        warn!("Increasing debug and print level ...");
+        self.debug_level = SPDK_LOG_DEBUG;
+        self.print_level = SPDK_LOG_DEBUG;
+        //}
 
         unsafe {
-            for flag in &self.log_component {
-                let cflag = CString::new(flag.clone()).unwrap();
-                if spdk_log_set_flag(cflag.as_ptr(), true) != 0 {
-                    return Err(EnvError::InitLog);
-                }
+            //jfor flag in &self.log_component {
+            let cflag = CString::new("thread").unwrap();
+            if spdk_log_set_flag(cflag.as_ptr(), true) != 0 {
+                return Err(EnvError::InitLog);
             }
+            //}
 
             spdk_log_set_level(self.debug_level);
             spdk_log_set_print_level(self.print_level);

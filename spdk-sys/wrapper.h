@@ -35,6 +35,7 @@
 #include <spdk/uuid.h>
 #include <spdk/version.h>
 #include <spdk_internal/event.h>
+#include <spdk_internal/thread.h>
 #include <spdk_internal/lvolstore.h>
 
 #include "logwrapper.h"

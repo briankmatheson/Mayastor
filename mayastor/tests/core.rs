@@ -6,6 +6,7 @@ use mayastor::{
         BdevHandle,
         MayastorCliArgs,
         MayastorEnvironment,
+        Mthread,
         Reactor,
     },
     nexus_uri::{bdev_create, bdev_destroy},
@@ -74,10 +75,12 @@ async fn works() {
 
     let desc = Bdev::open_by_name("core_nexus", false).unwrap();
     let channel = desc.get_channel().expect("failed to get IO channel");
+    dbg!(Mthread::current());
     drop(channel);
     drop(desc);
-
+    dbg!(Mthread::current());
     let n = nexus_lookup("core_nexus").expect("nexus not found");
+    dbg!(Mthread::current());
     n.destroy().await.unwrap();
 }
 

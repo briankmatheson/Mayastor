@@ -343,7 +343,7 @@ impl Reactor {
         R: 'static,
     {
         let reactor = Reactors::master();
-        reactor.thread_enter();
+        INIT_THREAD.get().unwrap().enter();
         let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
         let (task, handle) = async_task::spawn_local(future, schedule, ());
 
@@ -364,6 +364,7 @@ impl Reactor {
                 Poll::Pending => {
                     reactor.run_futures();
                     Reactors::master().poll_once();
+                    INIT_THREAD.get().unwrap().poll();
                 }
             }
         }
@@ -454,10 +455,10 @@ impl Reactor {
     /// can process, or submit any messages.
     #[inline]
     pub fn thread_enter(&self) {
-        if let Ok(thread) = self.threads.pop() {
-            thread.enter().enter();
-            self.threads.push(thread).unwrap();
-        }
+        // if let Ok(thread) = self.threads.pop() {
+        //     thread.enter().enter();
+        //     self.threads.push(thread).unwrap();
+        // }
     }
 
     /// polls the reactor only once for any work regardless of its state. For
@@ -469,7 +470,7 @@ impl Reactor {
 
         for _ in 0 .. self.threads.len() {
             if let Ok(thread) = self.threads.pop() {
-                thread.enter().poll().exit();
+                thread.poll();
                 self.threads.push(thread).unwrap();
             }
         }

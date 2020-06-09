@@ -50,7 +50,7 @@ use crate::{
             nexus_nvmf::{NexusNvmfError, NexusNvmfTarget},
         },
     },
-    core::{Bdev, DmaError},
+    core::{Bdev, DmaError, Mthread},
     ffihelper::errno_result_from_i32,
     jsonrpc::{Code, RpcErrorCode},
     nexus_uri::BdevCreateDestroy,
@@ -502,10 +502,12 @@ impl Nexus {
 
     /// Destroy the nexus
     pub async fn destroy(&mut self) -> Result<(), Error> {
+        dbg!(Mthread::current());
         // used to synchronize the destroy call
         extern "C" fn nexus_destroy_cb(arg: *mut c_void, rc: i32) {
             let s = unsafe { Box::from_raw(arg as *mut oneshot::Sender<bool>) };
 
+            dbg!(Mthread::current());
             if rc == 0 {
                 let _ = s.send(true);
             } else {

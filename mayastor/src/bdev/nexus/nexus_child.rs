@@ -8,7 +8,7 @@ use spdk_sys::{spdk_bdev_module_release_bdev, spdk_io_channel};
 
 use crate::{
     bdev::NexusErrStore,
-    core::{Bdev, BdevHandle, CoreError, Descriptor, DmaBuf},
+    core::{Bdev, BdevHandle, CoreError, Descriptor, DmaBuf, Mthread},
     nexus_uri::{bdev_destroy, BdevCreateDestroy},
     subsys::Config,
 };
@@ -189,7 +189,6 @@ impl NexusChild {
     /// close the bdev -- we have no means of determining if this succeeds
     pub(crate) fn close(&mut self) -> ChildState {
         trace!("{}: Closing child {}", self.parent, self.name);
-
         if let Some(bdev) = self.bdev.as_ref() {
             unsafe {
                 if !(*bdev.as_ptr()).internal.claim_module.is_null() {
