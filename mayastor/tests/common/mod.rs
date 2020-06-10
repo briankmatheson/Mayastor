@@ -286,6 +286,7 @@ pub fn dd_urandom_blkdev(device: &str) -> String {
     &run_script::ScriptOptions::new(),
     )
     .unwrap();
+    log::info!("dd:\nstdout: {}\nstderr: {}", stdout, stderr);
     assert_eq!(exit, 0, "stdout: {}\nstderr: {}", stdout, stderr);
     stdout
 }
