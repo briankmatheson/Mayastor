@@ -60,4 +60,5 @@ jobs:
       - run: ( sudo modprobe xfs )
       # In line below change 2048 to 8192 if running on self-hosted instead of ubuntu-latest.
       - run: ( echo 2048 | sudo tee /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages )
-      - run: (nix-shell --run ./test.sh)
+      - run: ( curl -L https://nixos.org/nix/install | sh )
+      - run: ( nix-shell --run ./test.sh )
