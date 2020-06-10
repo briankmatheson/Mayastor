@@ -45,6 +45,7 @@ use crate::{
     core::{
         reactor,
         reactor::{Reactor, Reactors},
+        thread::INIT_THREAD,
         Cores,
     },
     grpc::grpc_server_init,
@@ -253,6 +254,7 @@ impl Default for MayastorEnvironment {
 /// The actual routine which does the mayastor shutdown.
 /// Must be called on the same thread which did the init.
 async fn do_shutdown(arg: *mut c_void) {
+    INIT_THREAD.get().unwrap().enter();
     // callback for when the subsystems have shutdown
     extern "C" fn reactors_stop(_arg: *mut c_void) {
         Reactors::iter().for_each(|r| r.shutdown());
@@ -281,13 +283,12 @@ async fn do_shutdown(arg: *mut c_void) {
     };
 
     if cfg.nexus_opts.nvmf_enable {
-        let f = async move {
-            if let Err(msg) = nvmf::fini().await {
-                error!("Failed to finalize nvmf target: {}", msg);
-            }
-            debug!("nvmf target down");
-        };
-        f.await;
+        if let Err(msg) = nvmf::fini().await {
+            error!("Failed to finalize nvmf target: {}", msg);
+        }
+        debug!("nvmf target down");
+    } else {
+        info!("vnmf not loaded..");
     }
 
     unsafe {
@@ -586,7 +587,7 @@ impl MayastorEnvironment {
                 }
             };
 
-            Reactor::block_on(f);
+            Reactors::master().send_future(f);
         }
 
         Ok(())
@@ -681,7 +682,6 @@ impl MayastorEnvironment {
         // register our RPC methods
         crate::pool::register_pool_methods();
         crate::replica::register_replica_methods();
-        Reactors::master().poll_times(5);
 
         let rpc = CString::new(self.rpc_addr.as_str()).unwrap();
 

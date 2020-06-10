@@ -607,7 +607,7 @@ impl Target {
             assert_eq!(r.await.is_ok(), true);
         };
 
-        Reactor::block_on(fut);
+        fut.await;
 
         // first we need to inactivate all subsystems of the target
         for mut subsystem in SubsystemIter::new(self.inner) {

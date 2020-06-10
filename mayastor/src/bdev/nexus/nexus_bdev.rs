@@ -502,7 +502,6 @@ impl Nexus {
 
     /// Destroy the nexus
     pub async fn destroy(&mut self) -> Result<(), Error> {
-        dbg!(Mthread::current());
         // used to synchronize the destroy call
         extern "C" fn nexus_destroy_cb(arg: *mut c_void, rc: i32) {
             let s = unsafe { Box::from_raw(arg as *mut oneshot::Sender<bool>) };

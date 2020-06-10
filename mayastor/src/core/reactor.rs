@@ -125,7 +125,10 @@ impl Reactors {
         // and should be used to teardown as well.
 
         INIT_THREAD.get_or_init(|| {
-            Mthread::new("INIT_THREAD".into(), Cores::first()).unwrap()
+            let init =
+                Mthread::new("INIT_THREAD".into(), Cores::first()).unwrap();
+            dbg!(&init);
+            init
         });
     }
 
@@ -164,7 +167,7 @@ impl Reactors {
                 if unsafe { spdk_cpuset_get_cpu(mask, r.lcore) } {
                     let mt = Mthread(thread);
                     info!(
-                        "scheduled {} {:p} on {}",
+                        "scheduled {} {:p} on core:{}",
                         mt.name(),
                         thread,
                         r.lcore
@@ -328,7 +331,6 @@ impl Reactor {
         F: Future<Output = R> + 'static,
         R: 'static,
     {
-        let reactor = Reactors::master();
         INIT_THREAD.get().unwrap().enter();
         let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
         let (task, handle) = async_task::spawn_local(future, schedule, ());
@@ -345,12 +347,12 @@ impl Reactor {
         loop {
             match handle.as_mut().poll(cx) {
                 Poll::Ready(output) => {
+                    dbg!("future done");
+                    INIT_THREAD.get().unwrap().exit();
                     return output;
                 }
                 Poll::Pending => {
-                    reactor.run_futures();
                     Reactors::master().poll_once();
-                    INIT_THREAD.get().unwrap().poll();
                 }
             }
         }
@@ -436,17 +438,6 @@ impl Reactor {
         }
     }
 
-    /// Enters the first reactor thread.  By default, we are not running within
-    /// the context of any thread. We always need to set a context before we
-    /// can process, or submit any messages.
-    #[inline]
-    pub fn thread_enter(&self) {
-        // if let Ok(thread) = self.threads.pop() {
-        //     thread.enter().enter();
-        //     self.threads.push(thread).unwrap();
-        // }
-    }
-
     /// polls the reactor only once for any work regardless of its state. For
     /// now, the threads are all entered and exited explicitly.
     #[inline]
@@ -460,8 +451,6 @@ impl Reactor {
                 self.threads.push(thread).unwrap();
             }
         }
-
-        self.thread_enter();
     }
 
     pub fn poll_times(&self, times: u32) {
@@ -499,10 +488,12 @@ impl Future for &'static Reactor {
             DEVELOPER_DELAY => {
                 std::thread::sleep(Duration::from_millis(1));
                 self.poll_once();
+                INIT_THREAD.get().unwrap().poll();
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
             INIT => {
+                INIT_THREAD.get().unwrap().poll();
                 self.poll_once();
                 if cfg!(debug_assertions) {
                     self.developer_delayed();

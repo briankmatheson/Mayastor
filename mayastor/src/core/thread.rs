@@ -71,12 +71,14 @@ impl Mthread {
 
     #[inline]
     pub fn enter(self) -> Self {
+        info!("setting thread {:?}", self);
         unsafe { spdk_set_thread(self.0) };
         self
     }
 
     #[inline]
     pub fn exit(self) -> Self {
+        info!("exit thread {:?}", self);
         unsafe { spdk_set_thread(std::ptr::null_mut()) };
         self
     }
