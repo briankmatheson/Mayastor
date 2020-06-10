@@ -63,15 +63,9 @@ impl Mthread {
         self
     }
 
-    //TODO: we should pull out the management thread to avoid starvation
+    #[inline]
     pub fn poll(self) -> Self {
-        let mut done = false;
-        while !done {
-            let rc = unsafe { spdk_thread_poll(self.0, 0, 0) };
-            if rc < 1 {
-                done = true
-            }
-        }
+        let _rc = unsafe { spdk_thread_poll(self.0, 0, 0) };
         self
     }
 
@@ -82,17 +76,26 @@ impl Mthread {
     }
 
     #[inline]
-    pub fn exit(self) {
+    pub fn exit(self) -> Self {
         unsafe { spdk_set_thread(std::ptr::null_mut()) };
+        self
     }
 
     pub fn current() -> Option<Mthread> {
         Mthread::from_null_checked(unsafe { spdk_get_thread() })
     }
 
+    pub fn name(&self) -> &str {
+        unsafe {
+            std::ffi::CStr::from_ptr(&(*self.0).name[0])
+                .to_str()
+                .unwrap()
+        }
+    }
+
     /// destroy the given thread waiting for it to become ready to destroy
     pub fn destroy(self) {
-        debug!("destroying thread...{:p}", self.0);
+        debug!("destroying thread {}...{:p}", self.name(), self.0);
         unsafe {
             spdk_set_thread(self.0);
             // set that we *want* to exit, but we have not exited yet

@@ -75,7 +75,6 @@ unsafe impl Send for Reactors {}
 unsafe impl Sync for Reactor {}
 unsafe impl Send for Reactor {}
 pub static REACTOR_LIST: OnceCell<Reactors> = OnceCell::new();
-pub static REACTOR_LOCK: OnceCell<Mutex<bool>> = OnceCell::new();
 
 #[repr(C, align(64))]
 #[derive(Debug)]
@@ -122,6 +121,9 @@ impl Reactors {
             )
         });
 
+        // construct one main init thread, this thread is used to bootstrap
+        // and should be used to teardown as well.
+
         INIT_THREAD.get_or_init(|| {
             Mthread::new("INIT_THREAD".into(), Cores::first()).unwrap()
         });
@@ -160,8 +162,14 @@ impl Reactors {
         Self::with_reactor_locked(|| {
             if !Reactors::iter().any(|r| {
                 if unsafe { spdk_cpuset_get_cpu(mask, r.lcore) } {
+                    let mt = Mthread(thread);
+                    info!(
+                        "scheduled {} {:p} on {}",
+                        mt.name(),
+                        thread,
+                        r.lcore
+                    );
                     r.threads.push(Mthread(thread)).unwrap();
-                    info!("scheduled {:p} on {}", thread, r.lcore);
                     return true;
                 }
                 false
@@ -252,22 +260,6 @@ impl Reactor {
             sx,
             rx,
         };
-
-        // create a new main thread on which we run management tasks. As we are
-        // in the process of boot strapping the reactor is not active
-        // and thus we are not executing yet within a context of a valid
-        // thread. Therefore we dispatch a future which will get executed
-        // once we start polling.
-        reactor.send_future(async {
-            let core = Reactors::current().lcore;
-            // allocate the main thread
-            if Mthread::new(format!("core_{}_management", core), core).is_none()
-            {
-                panic!("failed to allocate thread during init");
-            }
-
-            trace!("dispatched future");
-        });
 
         reactor
     }

@@ -32,7 +32,7 @@ use spdk_sys::{
     SPDK_RPC_RUNTIME,
 };
 
-use crate::core::{Cores, Reactors};
+use crate::core::Reactors;
 
 /// Possible json-rpc return codes from method handlers
 #[derive(Debug, Clone, Copy)]
@@ -156,9 +156,9 @@ fn extract_json_object(
     Err("JSON parameters object not properly terminated".to_owned())
 }
 
-/// Generic handler called by spdk for handling incoming jsonrpc call. The task
-/// of this handler is to parse input parameters, invoke user-supplied handler,
-/// and encode output parameters.
+/// A generic handler called by spdk for handling incoming jsonrpc call. The
+/// task of this handler is to parse input parameters, invoke user-supplied
+/// handler, and encode output parameters.
 unsafe extern "C" fn jsonrpc_handler<H, P, R, E>(
     request: *mut spdk_jsonrpc_request,
     params: *const spdk_json_val,

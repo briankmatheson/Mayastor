@@ -613,7 +613,6 @@ impl MayastorEnvironment {
         } else {
             info!("RPC server listening at: {}", ctx.rpc.to_str().unwrap());
             unsafe {
-                dbg!(&Reactors::current());
                 spdk_rpc_initialize(ctx.rpc.as_ptr() as *mut i8);
                 spdk_rpc_set_state(SPDK_RPC_RUNTIME);
             };

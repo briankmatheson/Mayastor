@@ -36,6 +36,7 @@ impl IoChannel {
             .unwrap()
         }
     }
+
     fn thread_name(&self) -> &str {
         unsafe {
             std::ffi::CStr::from_ptr(&(*(*self.0).thread).name[0])
