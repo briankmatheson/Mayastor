@@ -15,7 +15,6 @@ use futures::future::Future;
 use nix::errno::Errno;
 use serde::{Deserialize, Serialize};
 
-use crate::core::{Cores, Reactors};
 use spdk_sys::{
     spdk_json_val,
     spdk_json_write_val_raw,
@@ -32,6 +31,8 @@ use spdk_sys::{
     SPDK_JSON_VAL_OBJECT_BEGIN,
     SPDK_RPC_RUNTIME,
 };
+
+use crate::core::{Cores, Reactors};
 
 /// Possible json-rpc return codes from method handlers
 #[derive(Debug, Clone, Copy)]

@@ -34,7 +34,7 @@ use std::{
     os::raw::c_void,
     pin::Pin,
     slice::Iter,
-    sync::{Arc, Mutex},
+    sync::Mutex,
     time::Duration,
 };
 
@@ -54,7 +54,6 @@ use spdk_sys::{
     spdk_env_thread_launch_pinned,
     spdk_env_thread_wait_all,
     spdk_thread,
-    spdk_thread_create,
     spdk_thread_get_cpumask,
     spdk_thread_lib_init_ext,
 };
@@ -77,7 +76,6 @@ unsafe impl Sync for Reactor {}
 unsafe impl Send for Reactor {}
 pub static REACTOR_LIST: OnceCell<Reactors> = OnceCell::new();
 pub static REACTOR_LOCK: OnceCell<Mutex<bool>> = OnceCell::new();
-pub static MASTER_REACTOR: OnceCell<Reactor> = OnceCell::new();
 
 #[repr(C, align(64))]
 #[derive(Debug)]
@@ -113,9 +111,6 @@ impl Reactors {
             };
             assert_eq!(rc, 0);
 
-            REACTOR_LOCK.get_or_init(|| Mutex::new(true));
-
-            REACTOR_LOCK.get().unwrap().lock().unwrap();
             Reactors(
                 Cores::count()
                     .into_iter()
@@ -155,7 +150,6 @@ impl Reactors {
     where
         F: FnOnce(),
     {
-        REACTOR_LOCK.get().unwrap().lock().unwrap();
         f()
     }
 
