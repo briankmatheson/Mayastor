@@ -356,7 +356,7 @@ fn rebuild_sizes() {
             common::wait_for_rebuild(
                 get_dev(2),
                 RebuildState::Completed,
-                std::time::Duration::from_secs(10),
+                std::time::Duration::from_secs(20),
             )
             .unwrap();
 
