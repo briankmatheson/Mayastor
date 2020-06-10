@@ -387,13 +387,14 @@ pub fn wait_for_rebuild(
 
     let mut curr_state = job.state();
     let ch = job.notify_chan.1.clone();
+    let cname = name.clone();
     let t = std::thread::spawn(move || {
         let now = std::time::Instant::now();
         let mut error = Ok(());
         while curr_state != state && error.is_ok() {
             select! {
                 recv(ch) -> state => {
-                    log::trace!("rebuild of child {} signalled with state {:?}", name, state);
+                    log::trace!("rebuild of child {} signalled with state {:?}", cname, state);
                     curr_state = state.unwrap_or_else(|e| {
                         log::error!("failed to wait for the rebuild with error: {}", e);
                         error = Err(());
@@ -411,6 +412,12 @@ pub fn wait_for_rebuild(
         error
     });
     reactor_poll!(r);
+    match RebuildJob::lookup(&name) {
+        Ok(job) => {
+            job.as_client().stats();
+        },
+        Err(_) => (),
+    };
     t.join().unwrap()
 }
 
