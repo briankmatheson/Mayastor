@@ -45,7 +45,7 @@ macro_rules! reactor_poll {
             }
         }
 
-        mayastor::core::Reactors::current().thread_enter();
+//        mayastor::core::Reactors::current().thread_enter();
     };
     ($ch:ident) => {
         loop {
@@ -54,7 +54,7 @@ macro_rules! reactor_poll {
                 break;
             }
         }
-        mayastor::core::Reactors::current().thread_enter();
+ //       mayastor::core::Reactors::current().thread_enter();
     };
 }
 #[macro_export]

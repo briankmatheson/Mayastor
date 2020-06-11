@@ -1,10 +1,5 @@
 use tonic::{transport::Server, Request, Response, Status};
 
-use rpc::{
-    mayastor::*,
-    service::mayastor_server::{Mayastor, MayastorServer},
-};
-
 use crate::{
     bdev::{
         nexus::{
@@ -20,9 +15,13 @@ use crate::{
         },
         nexus_create,
     },
-    core::{Cores, Reactors},
+    core::{thread::INIT_THREAD, Cores, Reactors},
     pool,
     replica,
+};
+use rpc::{
+    mayastor::*,
+    service::mayastor_server::{Mayastor, MayastorServer},
 };
 
 #[derive(Debug)]
@@ -66,7 +65,12 @@ fn print_error_chain(err: &dyn std::error::Error) -> String {
 /// expression in the macro. Err() variant returns from the function.
 macro_rules! locally {
     ($body:expr) => {{
-        let hdl = Reactors::current().spawn_local($body);
+        let hdl = Reactors::current().spawn_local(async move {
+            INIT_THREAD.get().unwrap().enter();
+            let res = $body.await;
+            INIT_THREAD.get().unwrap().exit();
+            res
+        });
         match hdl.await.unwrap() {
             Ok(res) => res,
             Err(err) => {

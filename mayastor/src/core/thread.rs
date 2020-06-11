@@ -59,7 +59,7 @@ impl Mthread {
     pub fn with<F: FnOnce()>(self, f: F) -> Self {
         self.enter();
         f();
-        self.poll().exit();
+        self.exit();
         self
     }
 

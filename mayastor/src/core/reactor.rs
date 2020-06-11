@@ -331,6 +331,7 @@ impl Reactor {
         F: Future<Output = R> + 'static,
         R: 'static,
     {
+        let _thread = Mthread::current();
         INIT_THREAD.get().unwrap().enter();
         let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
         let (task, handle) = async_task::spawn_local(future, schedule, ());
@@ -349,6 +350,10 @@ impl Reactor {
                 Poll::Ready(output) => {
                     dbg!("future done");
                     INIT_THREAD.get().unwrap().exit();
+                    _thread.map(|t| {
+                        info!("restoring thread!");
+                        t.enter()
+                    });
                     return output;
                 }
                 Poll::Pending => {

@@ -587,7 +587,7 @@ impl MayastorEnvironment {
                 }
             };
 
-            Reactors::master().send_future(f);
+            Reactor::block_on(f);
         }
 
         Ok(())

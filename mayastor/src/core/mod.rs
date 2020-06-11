@@ -23,7 +23,7 @@ mod env;
 mod handle;
 mod reactor;
 mod ring;
-mod thread;
+pub(crate) mod thread;
 mod uuid;
 
 #[derive(Debug, Snafu)]
