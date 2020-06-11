@@ -52,6 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: cachix/install-nix-action@v7
       - uses: actions/download-artifact@v2
         with:
           name: mayastor
@@ -60,5 +61,4 @@ jobs:
       - run: ( sudo modprobe xfs )
       # In line below change 2048 to 8192 if running on self-hosted instead of ubuntu-latest.
       - run: ( echo 2048 | sudo tee /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages )
-      - run: ( curl -L https://nixos.org/nix/install | sh )
       - run: ( nix-shell --run ./test.sh )
